@@ -2,8 +2,8 @@ import { gen_version_text } from "/src/version";
 import { MyMath, histgram, createTableHTML } from "/src/utils";
 
 export default class App {
-  constructor({ app }) {
-    app.innerHTML = `
+  constructor({ app_element }) {
+    app_element.innerHTML = `
 <div class="container">
   <span class="title">PopCrisis</span>
   <span class="version">${gen_version_text()}</span>
@@ -76,10 +76,15 @@ export default class App {
         },
         default_value: "default"
       },
-      simulation_speed: {
-        display_name: "simulation speed (yrs / iter)",
+      simulation_granularity: {
+        display_name: "simulation granularity (yr / iter)",
         data_type: ["numeric", "float"],
         default_value: 0.01
+      },
+      max_fps: {
+        display_name: "max simulation rate (iter / s)",
+        data_type: ["numeric", "float"],
+        default_value: 25
       }
     };
 
@@ -121,7 +126,7 @@ export default class App {
       return node;
     }
 
-    const stats_node = app.querySelector("#stats");
+    const stats_node = app_element.querySelector("#stats");
     for (const prop in stats) {
       const definition = stats[prop];
       stats_node.appendChild(create_stats_node(prop, definition));
@@ -138,7 +143,7 @@ export default class App {
       return node;
     }
 
-    const params_node = app.querySelector("#params");
+    const params_node = app_element.querySelector("#params");
     for (const prop in params) {
       const definition = params[prop];
       params_node.appendChild(create_params_node(prop, definition));
@@ -150,10 +155,38 @@ export default class App {
       sims: {}
     };
 
+    this.app_element = app_element;
     this.nodes = {
       params: params_node,
-      stats: stats_node
+      stats: stats_node,
+      controls: app_element.querySelector("#controls")
     };
+
+    function setup_start_button(app, button) {
+      button.addEventListener("click", (event) => {
+        if (button.innerText === "Start") {
+          button.innerText = "Pause";
+          app.is_paused = false;
+        } else {
+          button.innerText = "Start";
+          app.is_paused = true;
+        }
+      });
+    }
+    setup_start_button(
+      this,
+      this.nodes.controls.querySelector("#start-button")
+    );
+
+    function setup_reset_button(app, button) {
+      button.addEventListener("click", (event) => {
+        app.reset();
+      });
+    }
+    setup_reset_button(
+      this,
+      this.nodes.controls.querySelector("#reset-button")
+    );
 
     this.reset();
   }
@@ -165,14 +198,14 @@ export default class App {
       if (timestamp !== undefined) {
         if (last_update_time !== undefined) {
           const elapsed = timestamp - last_update_time;
-          if (elapsed > 100 /*ms*/ || true) {
-            const dyear = app.data.params.simulation_speed.default_value;
+          if (elapsed * app.data.params.max_fps.default_value >= 1000 /*ms*/) {
+            const dyear = app.data.params.simulation_granularity.default_value;
             app.update(dyear);
             last_update_time = timestamp;
             app.draw();
           }
         } else {
-          const dyear = app.data.params.simulation_speed.default_value;
+          const dyear = app.data.params.simulation_granularity.default_value;
           app.update(dyear);
           last_update_time = timestamp;
           app.draw();
@@ -196,9 +229,13 @@ export default class App {
     for (let i = 0; i < params.starting_population.default_value; i++) {
       sims.ages.push(age_gen());
     }
+    this.is_paused = true;
+    this.nodes.controls.querySelector("#start-button").innerText = "Start";
   }
 
   update(dy) {
+    if (this.is_paused) return;
+
     const { stats, params, sims } = this.data;
     sims.year += dy;
     const death_rate_func =
@@ -230,13 +267,15 @@ export default class App {
   }
 
   draw() {
+    // if (this.is_paused) return;
+
     const { stats, params, sims } = this.data;
 
     stats.year.value = sims.year;
     stats.population.value = sims.ages.length;
     stats.age_distribution.value = histgram(sims.ages, 0);
     // console.log(stats);
-    const dy = params.simulation_speed.default_value; // TODO: support variable-timestep simulation frames
+    const dy = params.simulation_granularity.default_value; // TODO: support variable-timestep simulation frames
     const diprev = Math.ceil(1 / dy);
     if (sims.population_history.length - diprev >= 0) {
       const pop = stats.population.value;
